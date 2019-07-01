@@ -1,302 +1,327 @@
-I organized this reposity mainly for learning GANs, so all codes about classical GANs were implemented with simple network structure and tested by MNIST dataset.   
-Just know about how mathmatical analysis (in network structure and loss function) works in actual codes, learn how others implement the GANs, and finally, enjoy the magic of GANs :-D   
+﻿---
+title: WGAN代码解读及实验总结
+categories: 
+- 计算机视觉 
+- 深度学习
+date: 2019-07-01 11:09:12
+tags:
+---
+GAN作为图像的另一个新领域，本成为21世纪最好的idea。嘿嘿，最近小试牛刀，下载了个WGAN的代码，这里简单分析下，给大家一个参考。
 
-For more theoretical details and pratical codes about GANs, please go to [GAN_Theories](https://github.com/YadiraF/GAN_Theories) and [GAN_Applications](https://github.com/YadiraF/GAN_Applications), thanks!     
+**【提示】
+本文预计阅读时间5分钟，带灰色底纹的和加粗的为重要部分哦！**
+<!--more-->
+## （一）WGAN初识
 
 
-***************
+![在这里插入图片描述](http://wx2.sinaimg.cn/large/e8c7da07ly1g4kf9xy7ubj20we0az40o.jpg)
 
-All have been tested with python2.7+ and tensorflow1.0+ in linux.  
+![在这里插入图片描述](http://wx4.sinaimg.cn/large/e8c7da07ly1g4kfa25crsj20o50ayacf.jpg)
 
-* Datas: save training data.  
-* Samples: save generated data, each folder contains several figs to **show the results**.  
-* utils: contains 2 files  
-	- data.py: prepreocessing data.  
-	- nets.py: Generator and Discriminator are saved here.  
+![在这里插入图片描述](http://wx3.sinaimg.cn/large/e8c7da07ly1g4kfa59t5kj20n20dj42e.jpg)
+
+
+
+## （二）代码分析
+### 2.1 main struct
+打开代码后，它的主要结构如下图所示。
+![在这里插入图片描述](http://wx4.sinaimg.cn/large/e8c7da07ly1g4kfappsw0j20eq09wadm.jpg)
+我们先看一下wgan_conv主函数，打开之后首先直接到最底main的位置，如下
+```python
+if __name__ == '__main__':
+
+	os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+	# the dir of pic generated
+	sample_folder = 'Samples/mnist_wgan_conv'
+	if not os.path.exists(sample_folder):
+		os.makedirs(sample_folder)
+
+	# net param
+	generator = G_conv_mnist()
+	discriminator = D_conv_mnist()
+	# data param
+	data = mnist()
+
+	# run
+	wgan = WGAN(generator, discriminator, data)
+	wgan.train(sample_folder)
+
+```
+这里做几点阐述
+>1、首先创建了一个目录用来存储你的生成图像，程序会每隔一段时间输出一个图像。
+>2、搞了三个类，一个generater生成器网络，一个是discriminator判别器类，然后是数据类。
+>3、又声明一个对象WGAN网络，然后调用它的train函数
+
+OK至此，主函数结构阐述清楚。那此时你会想generater咋定义？discriminator咋定义？
+好一个一个看。
+### 2.2 generator
+generator是生成器网络，其实就是搭了一个上采样的网络，先将噪声输入一维向量，通过全连接到更多的数据，然后把它展开成二维的图像，这里我们先用的灰度，你也可以改成彩色。然后再上采样，随意搞得，反正最后你要上采样到和你的正样本图像维度一致。如下所示：
+```python
+class G_conv_mnist(object):
+	def __init__(self):
+		self.name = 'G_conv_mnist'
+
+	def __call__(self, z):
+		with tf.variable_scope(self.name) as scope:
+			#step 1 全连接层，把z白噪声变为8*15*128图
+			g = tcl.fully_connected(z, 8*15*128, activation_fn = tf.nn.relu, normalizer_fn=tcl.batch_norm,
+									weights_initializer=tf.random_normal_initializer(0, 0.02))
+			g = tf.reshape(g, (-1, 8, 15, 128)) 
+			#step 2 反卷积/上采样 到16*30*64图    4代表卷积核大小
+			g = tcl.conv2d_transpose(g, 64, 4,stride=2, 
+									activation_fn=tf.nn.relu, normalizer_fn=tcl.batch_norm, padding='SAME', weights_initializer=tf.random_normal_initializer(0, 0.02))
+			#step 3 反卷积/上采样 到32*60*1的图，此时和真实手写体的数据是一样的图
+			g = tcl.conv2d_transpose(g, 1, 4, stride=2, 
+										activation_fn=tf.nn.sigmoid, padding='SAME', weights_initializer=tf.random_normal_initializer(0, 0.02))
+			print(g.shape)
+			return g
+	@property
+	def vars(self):
+		return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.name)
 	
-Note:  
-> The final layer can be sigmoid(data: [0,1]) or tanh(data:[-1,1]), my codes all use sigmoid.  
-> Using weights_initializer=tf.random_normal_initializer(0, 0.02) will converge faster.  
-
-**DCGAN**  
-
-- [x] conv   
-
-
-**Conditional GAN**  
-
-- [x] condition + mlp `D:G = 1:1`
-- [x] condition + conv(dcgan)  `D:G=1:1 faster than mlp`
-- [x] dcgan + classifier `D:G:C = 1:1:1 very fast`
-- [x] wgan + classifier `D:G:C = 5:1:1  fast`
-
-
-Note:
-> a. The step ratio of G and D is important and it takes some time to reach the balance. Condition+mlp with D:G = 1:1 works better than 2:1.   
-> b. Adding a classfier to trained with conditions and constraint G works faster and better than appending conditions to images for D training.  
-
-
-**Wasserstein GAN**
-
-- [x] wgan + mlp `D:G = 5: 1 not good, need to *modify*`
-- [x] wgan + conv(dcgan) `D:G = 5:1 clip = 0.01`
-
-
-**infoGAN**
-
-- [x] infogan + mlp + D and Q not share `Q loss to update G(as feedback) not  good `
-- [x] infogan + mlp + D and Q share `not  good. lacking numbers`
-- [x] infogan + conv + D and Q not share `clear and have 10 number`
-- [x] infogan + conv + D and Q share `the same with not share, not faster? `
-- [ ] infogan + wgan + D and Q not share `to be done`  
-
-Results are shown in the end of this page.   
-
-# Adversarial Nets  
-
-:sparkles: GAN  
---------
-**The beginning.**  
-The first paper.   
-
-Two main research directions:  
-1. stabilize the training  
-2. apply GAN  
-### paper  
-[[Generative Adversarial Nets]](https://arxiv.org/pdf/1406.2661.pdf)   
-
-- **Loss** :  
-![GAN loss](README/images/gan.png)  
-
-### blog
-[[openai/generative-models]](https://blog.openai.com/generative-models/#contributions) (Motivation, Game Theory)   
-[[wiseodd/gan-tensorflow]](http://wiseodd.github.io/techblog/2016/09/17/gan-tensorflow/) (Introduction, Implementation)  
-
-
- ***************
- 
-:sparkles:DCGAN  
---------
-**stabilize the training with some architectural constraints.**  
-GAN is hard to train.   
-Stabilize Generative Adversarial networks with some architectural constraints.  
-Popular used in cv. Most used architecture.  
-
-### paper  
-[[Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks]](https://arxiv.org/pdf/1511.06434.pdf)  
-
-**Architecture guidelines for stable Deep Convolutional GANs**  
-
-* Replace any pooling layers with strided convolutions (discriminator) and fractional-strided convolutions (generator).  
-* Use batchnorm in both the generator and the discriminator  
-* Remove fully connected hidden layers for deeper architectures. Just use average pooling at the end.  
-* Use ReLU activation in generator for all layers except for the output, which uses Tanh.
-* Use LeakyReLU activation in the discriminator for all layers.  
-
-
-### blog
-[[bamos/deep-completion]](http://bamos.github.io/2016/08/09/deep-completion/)  (Introduction, Implementation)  
-
-### code
-[[carpedm20/DCGAN-tensorflow]](https://github.com/carpedm20/DCGAN-tensorflow)( star 1.6k+,  many files, easy to run, hard to read and modify)  
-> G: fc-->reshape--> deconv bn relu (4) --> tanh  
-> D: conv bn lrelu[leak=0.2] (4) --> reshape--> fc(opn=1)-->sigmoid  
-> G Loss:   
->
-		tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.D_logits_,tf.ones_like(self.D_)))
-> D Loss:   
->
-		tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.D_logits, tf.ones_like(self.D))) + tf.reduce_mean(sigmoid_cross_entropy_with_logits(self.D_logits_, tf.zeros_like(self.D_)))
-> Solver: Adam lr=0.0002  stepG:stepD=1:1   
-> Data: mnist celebA __normalized to [-1,1] for tanh  and  [0,1] for sigmoid__  
-
-[[sugyan/tf-dcgan]](https://github.com/sugyan/tf-dcgan)( star 20,  easy to read, just 1 dcgan file. dcgan, generator, discriminator all class. not tf.contrib.layers. )  
-> G: fc-->reshape--> deconv bn relu (4) --> tanh  
-> D: conv bn lrelu[leak=0.2] (4) --> reshape--> fc(opn=2 one-hot?)  
-> Losses:  softmax_cross_entropy_with_logits  
-> Solver: Adam lr=0.0002  stepG:stepD=1:1   
-
-
- ***************
- 
-:sparkles:Conditional GAN  
---------
-**Apply GAN by adding condition(supervised)**  
-Add conditions to GAN by feeding y to G.   
-G(z)-->G(z,y)  D(X)-->D(X,y)  
-- z: the same as in GAN. unconstrained noise to generate a image.  
-- y: the condition to constraint the network. supervised.  
-A very important structure that used in image applications (data augmentation, image transfer, etc.)   
-Make GAN useful.   
-
-### paper
-[[Conditional Generative Adversarial Nets]](https://arxiv.org/pdf/1411.1784.pdf)  
-
-- **Loss** :  
-![CGAN loss](README/images/cgan.png)   
-
-### blog
-[[wiseodd/conditional-gan-tensorflow]](http://wiseodd.github.io/techblog/2016/12/24/conditional-gan-tensorflow/)  (Fomulation, Architecture, Implementation)  
-
-### code
-[[wiseodd/conditional_gan]](https://github.com/wiseodd/generative-models/blob/master/GAN/conditional_gan/cgan_tensorflow.py)(star 500+, very simple, 1 file, easy to read and run,  not conv, inconvinient to extend)  
-> G: concat(z,y)-->fc-->sigmoid  
-> D: concat(z,y)-->fc-->sigmoid loss  
-> Solver: Adam lr=0.001  stepG:stepD=1:1   
-> Data: mnist __[0,1]__  
-
-[[zhangqianhui/Conditional-Gans]](https://github.com/zhangqianhui/Conditional-Gans)(star 16, easy to extend)  
-> G: concat(z,y)-->fc-->conv-->sigmoid  
-> D: **conv_concat(x,y)**-->conv-->fc-->sigmoid loss  
-> Solver: Adam lr=0.0002  stepG:stepD=2:1   
-> Data: mnist __[0,1]__  
-
-[[fairytale0011/Conditional-WassersteinGAN]](https://github.com/fairytale0011/Conditional-WassersteinGAN/blob/master/WGAN_AC.py) (star 6. use wgan to train GAN, use separate classifier to enforce the condition. very clear, easy to read and modify)  
-> G: concat(z,y)-->fc-->conv-->tanh  
-> D: X-->conv-->fc-->sigmoid loss  
-> **classifier**: X-->conv-->fc-->softmax loss (real label to train classifier, fake label to train G)   
-> clip D var  
-> Solver: RMS  lr=0.0002  stepG:stepD:stepC_real:stepC_fake=1:10:0.5:0.5   
-> Data: mnist __[-1,1]__  
-
-
- ***************
-
-:sparkles:Wasserstein GAN
---------
-**stabilize the training by using Wasserstein-1 distance**  
-GAN before using JS divergence has the problem of non-overlapping, leading to mode collapse and convergence difficulty.   
-Use EM distance or Wasserstein-1 distance, so GAN solve the two problems above without particular architecture (like dcgan).   
-
-### paper
-[[Wasserstein GAN]](https://arxiv.org/pdf/1701.07875.pdf)
-
-**Algorithm guidelines for stable GANs**  
-
-* No log in the loss. The output of D is no longer a probability, hence we do not apply sigmoid at the output of D
-* Clip the weight of D (0.01)
-* Train D more than G (5:1)
-* Use RMSProp instead of ADAM
-* Lower learning rate (0.00005)
-
-### blog
-[[AidenN/WassersteinGAN]](https://paper.dropbox.com/doc/Wasserstein-GAN-GvU0p2V9ThzdwY3BbhoP7)  (Theory)  
-[[wiseodd/wasserstein-gan]](http://wiseodd.github.io/techblog/2017/02/04/wasserstein-gan/)  (Introduction, Implementation)  
-[[zhihu/Wassertein GAN]](https://zhuanlan.zhihu.com/p/25071913)   (Introduction, Analysis)  
-
-### code
-[[wiseodd/wgan_tensorflow]](https://github.com/wiseodd/generative-models/blob/master/GAN/wasserstein_gan/wgan_tensorflow.py)(very simple, use mlp)  
-> G: fc-->sigmoid  
-> D: fc  clip D  
-> G Loss:   
->
-		G_loss = -tf.reduce_mean(D_fake)
-> D Loss:   
->
-		D_loss = tf.reduce_mean(D_fake) - tf.reduce_mean(D_real) 
-> Solver: RMSProp lr=0.0001  stepG:stepD=1:5   
-
-
-****************
-
-:sparkles:InfoGAN
---------
-**Apply GAN by learning conditions(unsupervised)**  
-Attempt to make conditional learned automatically. Find and control some useful information in the images.  
-- z: the same as in GAN. unconstrainted noise to generate a image.  
-- c: like c in conditional GAN, but learned by Q instead of given what that is, unsupervised.  
-
-### paper
-[[InfoGAN: Interpretable Representation Learning by Information Maximizing Generative Adversarial Nets]](https://arxiv.org/pdf/1606.03657.pdf)
-
-- **Loss** :
-
-![infoGAN loss 1](README/images/infogan1.png)   
-
-Define: Q(c|x) to approximate P(c|x)(which is the conditional distribution)  
-
-![infoGAN loss 2](README/images/infogan2.png)   
-
-### blog
-[[wiseodd/infogan]](http://wiseodd.github.io/techblog/2017/01/29/infogan/)  (Introduction Implementation)  
-
-### code
-[[openai/infogan]](https://github.com/openai/InfoGAN)( star 300+,  hard to read and modify, too much files)  
-> G: fc(1024 bn relu)-->fc (bn relu) reshape--> deconv bn relu --> deconv flatten--> activate  
-> D and Q:   
-> shared: reshape-->conv lrelu --> conv bn lrelu --> fc bn lrelu   
-> D: fc(1) --> activate  
-> Q: fc(128) bn lrelu --> fc (c_dim) --> activate    
-> activate: softmax(Categorical)  / mean stddev:sqrt(e^x) (Gaussian) / sigmoid(Bernoulli)  
-> Losses:   
-> D and G: sigmoid as DCGAN   
-> Q: cross entropy loss (softmax for discrete) ** add Q loss to D and G loss **  
-> Solver:   
-> Adam beta1=0.5 stepG:stepD=1:1   
-
-*my understanding*:   
-> Adding Q loss to D and G loss, then updating D var and G var by 1:1 **equal to** Q loss to update Q(D) var and G var by Q:D:G=2:1:1  
-
-[[wiseodd/infogan-tensorflow]](https://github.com/wiseodd/generative-models/blob/master/GAN/infogan/infogan_tensorflow.py)(also simple, use mlp)  
-> Q: fc --> softmax with c (not share with D)  update vars: G and Q  
-> Solver: Adam G:D:Q = 1:1:1  
-
-# Results
-All images shown here are from `./Samples`, for more information about results, please go to the folder.   
-Then first number of image name is the trianing epoches.   
-For better observing, I keep generated images in the beginning, middle and final training process for each algorithm.  
-
-**Conditional GAN**  
-
-
-- [x] condition + mlp `each pic has the same condition`  
-
-![cgan](README/results/cgan_mlp.png)   
- 
- 
-- [x] condition + conv(dcgan)   `each row has the same condition: [0 0 0 0; 1 1 1 1; 2 2 2 2; 3 3 3 3]`    
-
-![cgan](https://raw.githubusercontent.com/YadiraF/GAN/master/Samples/mnist_cgan_conv/039_9.png)   
-
-- [x] dcgan + classifier `condition: [0 1 2 3; 4 5 6 7; 0 1 2 3; 4 5 6 7]  `
-
-![cgan](https://raw.githubusercontent.com/YadiraF/GAN/master/Samples/mnist_cgan_classifier/348_8.png)   
-
-- [x] wgan + classifier  `condition: [0 1 2 3; 4 5 6 7; 0 1 2 3; 4 5 6 7]  `
-
-![cgan](https://raw.githubusercontent.com/YadiraF/GAN/master/Samples/mnist_cgan_wgan_classifier/030_0.png)   
-
-
-
-**InfoGAN**  
-The generated images with the same condition belong to the same category.  
-
-- [x] infogan + conv + D and Q not share `condition: [0 1 2 3; 4 5 6 7; 8 9 0 1; 2 3 4 5] `  
-
-![cgan](https://raw.githubusercontent.com/YadiraF/GAN/master/Samples/mnist_infogan_conv_without_share/058_8.png)   
-
-- [x] infogan + conv + D and Q share `condition: [0 1 2 3; 4 5 6 7; 8 9 0 1; 2 3 4 5] `  
-
-![cgan](https://raw.githubusercontent.com/YadiraF/GAN/master/Samples/mnist_infogan_conv/095_5.png)   
-
-
-
-**DCGAN**
-
-* 3D face result (dcgan)  
-![3d face](README/results/face3D_dcgan.png)   
-
-
-
-
-# Others
-Tensorflow style: https://www.tensorflow.org/community/style_guide  
-tf.concat(1,[x,y]) in tf 0.12- --->  tf.concat([x,y],1) in tf 1.0+.  
-use tf.get_Variable or tf.contrib.layers to reuse variables.  
-
-A good website to convert latex equation to img(then insert into README):
-http://www.sciweavers.org/free-online-latex-equation-editor 
-
-
-
+```
+>注意：
+>这里你会看到一个call函数，它是咋用呢？
+>一个类下面有个call函数，你就可以生成一个对象后，直接把它当成方法用。例如
+>class G():
+>		__call__(x):
+>			print(x)
+>这样的话你就A = G()，然后再A(1)就打印了1。
+>其实就是说这个类弄好了，之后可以直接当函数用。
+
+好，然后我们看一下discriminator
+
+### 2.3 discriminator
+和generator干了差不多的事情，他要把X和GX输进去，然后搭建一个卷积网络判别真假。
+
+```python
+class D_conv_mnist(object):
+	def __init__(self):
+		self.name = 'D_conv_mnist'
+	def __call__(self, x, reuse=False):
+		with tf.variable_scope(self.name) as scope:
+			if reuse:
+				scope.reuse_variables()
+			size = 64
+			#step 1 卷积4*4卷积核 bzx30x60x1 -> bzx15x30x64
+			shared = tcl.conv2d(x, num_outputs=size, kernel_size=4, 
+						stride=2, activation_fn=lrelu)
+			#step 2 卷积4*4卷积核 bzx15x30x64 -> bzx7x15x128
+			shared = tcl.conv2d(shared, num_outputs=size * 2, kernel_size=4,
+						stride=2, activation_fn=lrelu, normalizer_fn=tcl.batch_norm)
+			#step 3 展开向量 bzx7x15x128 -> bzx6372
+			shared = tcl.flatten(shared)
+			#step 4 全连接层
+			d = tcl.fully_connected(shared, 1, activation_fn=None, weights_initializer=tf.random_normal_initializer(0, 0.02))
+			q = tcl.fully_connected(shared, 128, activation_fn=lrelu, normalizer_fn=tcl.batch_norm)
+			q = tcl.fully_connected(q, 10, activation_fn=None) # 10 classes
+			return d, q
+	@property
+	def vars(self):
+		return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.name)
+
+```
+
+
+### 2.4 数据的导入改写
+我下载的代码是直接导入的minist数据集，我们可能要导入图片数据集哈，这里我做了一些改变。
+这里加了个next_batch函数，先生成随机序列，然后读取batch图像，存到数据集中。
+
+```python
+class mnist():
+	def __init__(self, flag='conv', is_tanh = False):
+		self.datapath = prefix + 'bus_data/'
+		self.X_dim = 784 # for mlp
+		self.z_dim = 100
+		self.y_dim = 10
+		self.sizex = 32 # for conv
+		self.sizey = 60 # for conv
+		self.channel = 1 # for conv
+		#self.data = input_data.read_data_sets(datapath, one_hot=True)
+		self.flag = flag
+		self.is_tanh = is_tanh
+		self.Train_nums = 17
+
+	def __call__(self,batch_size):
+		batch_imgs = self.next_batch(self.datapath,batch_size)
+		#batch_imgs,y = self.next_batch(prefix,batch_size)
+		if self.flag == 'conv':
+			batch_imgs = np.reshape(batch_imgs, (batch_size, self.sizex, self.sizey, self.channel)) 
+		if self.is_tanh:
+			batch_imgs = batch_imgs*2 - 1
+		#return batch_imgs, y
+		return batch_imgs
+
+	def next_batch(self,data_path, batch_size):
+	#def next_batch(self,data_path, lable_path, batch_size):
+		train_temp = np.random.randint(low=0, high=self.Train_nums, size=batch_size) # 生成元素的值在[low,high)区间，随机选取
+		train_data_batch = np.zeros([batch_size,self.sizex,  self.sizey]) # 其中[img_row,  img_col, 3]是原数据的shape，相应变化
+		#train_label_batch = np.zeros([batch_size, self.size, self.size]) #
+		count = 0 # 后面就是读入图像，并打包成四维的batch
+		#print(data_path)
+		img_list = os.listdir(data_path)
+		#print(img_list)
+	
+		for i in train_temp:
+			img_path = os.path.join(data_path, img_list[i])  # 图片文件
+			img = cv.imread(img_path)
+			gray = cv.cvtColor(img,cv.COLOR_RGB2GRAY)
+			train_data_batch[count, :, :]  = cv.resize(gray,(self.sizey,  self.sizex))
+			count+=1
+		return train_data_batch#, train_label_batch
+	def data2fig(self, samples):
+		if self.is_tanh:
+			samples = (samples + 1)/2
+		fig = plt.figure(figsize=(4, 4))
+		gs = gridspec.GridSpec(4, 4)
+		gs.update(wspace=0.05, hspace=0.05)
+
+		for i, sample in enumerate(samples):
+			ax = plt.subplot(gs[i])
+			plt.axis('off')
+			ax.set_xticklabels([])
+			ax.set_yticklabels([])
+			ax.set_aspect('equal')
+			plt.imshow(sample.reshape(self.sizex,self.sizey), cmap='Greys_r')
+		return fig	
+
+```
+
+### 2.5 WGAN网络
+首先是搭网络NET，discriminator分别把真实的正样本X投进去，把噪声产生的G_sample投进去，得到正负结果。
+
+```python
+# nets
+		self.G_sample = self.generator(self.z)
+
+		self.D_real, _ = self.discriminator(self.X)
+		self.D_fake, _ = self.discriminator(self.G_sample, reuse = True)
+
+```
+然后就是计算损失。我们利用上面结果分别计算D和G的损失，然后有两个优化器，分别对于D和G
+```python
+# loss
+		self.D_loss = - tf.reduce_mean(self.D_real) + tf.reduce_mean(self.D_fake)
+		self.G_loss = - tf.reduce_mean(self.D_fake)
+
+		self.D_solver = tf.train.RMSPropOptimizer(learning_rate=1e-4).minimize(self.D_loss, var_list=self.discriminator.vars)
+		self.G_solver = tf.train.RMSPropOptimizer(learning_rate=1e-4).minimize(self.G_loss, var_list=self.generator.vars)
+
+```
+这里网络就搭建好了，我们要看一下train函数。其主要是先优化D再优化G这个步骤，这里我么此优化G和D的次数相同，你也可以去调整这个n_d。
+```python
+for epoch in range(training_epoches):
+			# update D
+			n_d = 20 if epoch < 250 or (epoch+1) % 500 == 0 else 10
+			for _ in range(n_d):
+				#X_b, _ = self.data(batch_size)
+				X_b= self.data(batch_size)
+				self.sess.run(self.clip_D)
+				self.sess.run(
+						self.D_solver,
+            			feed_dict={self.X: X_b, self.z: sample_z(batch_size, self.z_dim)}
+						)
+			# update G
+			for _ in range(n_d):
+				#X_b, _ = self.data(batch_size)
+				X_b= self.data(batch_size)
+				self.sess.run(self.clip_D)
+				self.sess.run(
+					self.G_solver,
+					feed_dict={self.z: sample_z(batch_size, self.z_dim)}
+				)
+```
+对于WGAN的全部代码如下
+
+```python
+class WGAN():
+	def __init__(self, generator, discriminator, data):
+		self.generator = generator
+		self.discriminator = discriminator
+		self.data = data
+
+		self.z_dim = self.data.z_dim
+		self.sizex = self.data.sizex
+		self.sizey = self.data.sizey
+		self.channel = self.data.channel
+
+		self.X = tf.placeholder(tf.float32, shape=[None, self.sizex, self.sizey, self.channel])
+		self.z = tf.placeholder(tf.float32, shape=[None, self.z_dim])
+		# nets
+		self.G_sample = self.generator(self.z)
+
+		self.D_real, _ = self.discriminator(self.X)
+		self.D_fake, _ = self.discriminator(self.G_sample, reuse = True)
+
+		# loss
+		self.D_loss = - tf.reduce_mean(self.D_real) + tf.reduce_mean(self.D_fake)
+		self.G_loss = - tf.reduce_mean(self.D_fake)
+
+		self.D_solver = tf.train.RMSPropOptimizer(learning_rate=1e-4).minimize(self.D_loss, var_list=self.discriminator.vars)
+		self.G_solver = tf.train.RMSPropOptimizer(learning_rate=1e-4).minimize(self.G_loss, var_list=self.generator.vars)
+		
+		# clip
+		self.clip_D = [var.assign(tf.clip_by_value(var, -0.01, 0.01)) for var in self.discriminator.vars]
+		
+		gpu_options = tf.GPUOptions(allow_growth=True)
+		self.sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+
+	def train(self, sample_folder, training_epoches = 100000, batch_size = 5):
+		i = 0
+		self.sess.run(tf.global_variables_initializer())
+		
+		for epoch in range(training_epoches):
+			# update D
+			n_d = 20 if epoch < 250 or (epoch+1) % 500 == 0 else 10
+			for _ in range(n_d):
+				#X_b, _ = self.data(batch_size)
+				X_b= self.data(batch_size)
+				self.sess.run(self.clip_D)
+				self.sess.run(
+						self.D_solver,
+            			feed_dict={self.X: X_b, self.z: sample_z(batch_size, self.z_dim)}
+						)
+			# update G
+			for _ in range(n_d):
+				#X_b, _ = self.data(batch_size)
+				X_b= self.data(batch_size)
+				self.sess.run(self.clip_D)
+				self.sess.run(
+					self.G_solver,
+					feed_dict={self.z: sample_z(batch_size, self.z_dim)}
+				)
+
+			# print loss. save images.
+			if epoch % 100 == 0 or epoch < 100:
+				D_loss_curr = self.sess.run(
+						self.D_loss,
+            			feed_dict={self.X: X_b, self.z: sample_z(batch_size, self.z_dim)})
+				G_loss_curr = self.sess.run(
+						self.G_loss,
+						feed_dict={self.z: sample_z(batch_size, self.z_dim)})
+				print('Iter: {}; D loss: {:.4}; G_loss: {:.4}'.format(epoch, D_loss_curr, G_loss_curr))
+
+				if epoch % 1000 == 0:
+					samples = self.sess.run(self.G_sample, feed_dict={self.z: sample_z(16, self.z_dim)})
+					print(samples.shape)
+					fig = self.data.data2fig(samples)
+					plt.savefig('{}/{}.png'.format(sample_folder, str(i).zfill(3)), bbox_inches='tight')
+					i += 1
+					plt.close(fig)
+```
+
+
+
+## （三）实验结果
+我找了17张车的图片~~原谅我比较懒，如下图所示。基本都是差不多样子的。
+![在这里插入图片描述](http://wx4.sinaimg.cn/large/e8c7da07ly1g4kfasarlqj20hq069q76.jpg)
+然后代码跑起来~我们把它resize到（30，60），主要是为了让我的机器跑快些，本来就怂。
+一开始是一堆噪声图如下图所示。![在这里插入图片描述](http://wx2.sinaimg.cn/large/e8c7da07ly1g4kfb1ggwnj209d08kadl.jpg)
+其实在训练一段时间后如下所示，可以看出具有一定车的样子，中间黑车身，貌似也能看到个车轱辘。哈哈。初见效果~
+![在这里插入图片描述](http://wx3.sinaimg.cn/large/e8c7da07ly1g4kfb2c7ajj209d086tad.jpg)
+损失的结果如下所示：
+![在这里插入图片描述](http://wx1.sinaimg.cn/large/e8c7da07ly1g4kfb2u5lmj20i2057mxj.jpg)
+## （四）总结
+通过这个实验对于GAN有了初步的了解，如果有什么写的不对的地方，还请指出。这里附上代码：
+https://github.com/Harryjun/wgan_demo
 
