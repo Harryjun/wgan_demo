@@ -224,16 +224,16 @@ class G_conv_mnist(object):
 	def __call__(self, z):
 		with tf.variable_scope(self.name) as scope:
 			#step 1 全连接层，把z白噪声变为8*15*128图
-			g = tcl.fully_connected(z, 8*15*128, activation_fn = tf.nn.relu, normalizer_fn=tcl.batch_norm,
+			g = tcl.fully_connected(z, 32*24*64, activation_fn = tf.nn.relu, normalizer_fn=tcl.batch_norm,
 									weights_initializer=tf.random_normal_initializer(0, 0.02))
-			g = tf.reshape(g, (-1, 8, 15, 128)) 
+			g = tf.reshape(g, (-1, 32, 24, 64)) 
 			#step 2 反卷积/上采样 到16*30*64图    4代表卷积核大小
-			g = tcl.conv2d_transpose(g, 64, 4,stride=2, 
+			g = tcl.conv2d_transpose(g, 32, 4,stride=2, 
 									activation_fn=tf.nn.relu, normalizer_fn=tcl.batch_norm, padding='SAME', weights_initializer=tf.random_normal_initializer(0, 0.02))
 			#step 3 反卷积/上采样 到32*60*1的图，此时和真实手写体的数据是一样的图
-			g = tcl.conv2d_transpose(g, 1, 4, stride=2, 
+			g = tcl.conv2d_transpose(g, 3, 4, stride=2, 
 										activation_fn=tf.nn.sigmoid, padding='SAME', weights_initializer=tf.random_normal_initializer(0, 0.02))
-			print(g.shape)
+			#print(g.shape)
 			return g
 	@property
 	def vars(self):
